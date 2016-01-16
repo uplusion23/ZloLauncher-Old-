@@ -1,0 +1,523 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+namespace ZloLauncher_uplusion23.zloAPI
+{
+    class BF3
+    {
+        // server-array (int key, class values => sID, Serverdata)
+        public static Dictionary<int, Data.BF3server> ServerList = new Dictionary<int, Data.BF3server>();
+
+        // stats-array (string key, float value)
+        public static Dictionary<string, float> PlayerStats = new Dictionary<string, float>();
+
+
+        // main entry point
+        public BF3()
+        {
+            ZLO_Init();
+            SetupEvents();
+        }
+
+
+        // destructor
+        ~BF3()
+        {
+            try
+            {
+                ZLO_Close();
+            }
+            catch (Exception)
+            {
+                // nothing
+            }
+        }
+
+
+        // connect Client to emu.bf3.zloemu.org
+        public bool ConnectClient()
+        {
+            if (ZLO_ConnectMClient())
+            {
+                // clear ServerList if user switched from ServerLauncherMode
+                ServerList.Clear();
+                return true;
+            }
+            return false;
+        }
+
+
+        // connect Server to emu.bf3.zloemu.org
+        public bool ConnectServer()
+        {
+            if (ZLO_ConnectMServer())
+            {
+                // clear ServerList if user switched from ClientLauncherMode
+                ServerList.Clear();
+                return true;
+            }
+            return false;
+        }
+
+
+        // login client
+        public void LoginClient(string mail, string pass)
+        {
+            // for some very strange reason ZLO_AuthClient() sometimes throws a System.AccessViolationException without any InnerException
+            // so we catch off the exception
+            try
+            {
+                ZLO_AuthClient(mail, pass);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                Console.WriteLine("Login failed! Please try again.");
+            }
+        }
+
+
+        // zloAPI messages
+        private void EventListener(int zevent)
+        {
+            bool reset = true;
+            switch (zevent)
+            {
+                case 0:             // Auth success
+                    //ZLO_GetVersion(Program.iZloLauncherID);                             // Launcher Version
+                    Program.iUserID = ZLO_GetID();                                      // userID
+                    Program.sUsername = Marshal.PtrToStringAnsi(ZLO_GetName());         // user name
+                    ZLO_GetDogTags();                                                   // gather Dogtags
+                    ZLO_GetClanTag();                                                   // gather Clantag
+                    ZLO_GetServerList();
+                    Program.bLoggedin = true;
+                    Program.PrintInfo("Success!");
+                    // DO NOT ASK STATS(ZLO_GetStats) HERE, it's a big packet, and with serverlist updating the connection could die
+                    // ask for stats after finishing server list in event 24
+
+                    // don't set waiter here as we have to wait some more time for the serverlist to finish loading
+                    reset = false;
+                    break;
+                case 1:             // Auth Error (wrong mail/pass)
+                    Program.PrintError("mail or password invalid!");
+                    break;
+                case 2:             // Auth Error (old LauncherBF3.dll)
+                    Program.PrintError("LauncherBF3.dll outdated!");
+                    Program.UpdateDLL(1);
+                    break;
+                case 3:             // selected server ok
+                    Program.bSelectvalid = true;
+                    Program.PrintInfo("Server " + Program.iLastServer + " selected.");
+                    break;
+                case 4:             // selected server not found
+                    Program.PrintWarning("Selected server not found!");
+                    Program.bSelectvalid = false;
+                    break;
+                case 5:             // selected server full
+                    Program.PrintWarning("Selected server is full!");
+                    Program.bSelectvalid = false;
+                    break;
+                case 6:             // selected server not ready
+                    Program.PrintWarning("Server not responding! Try again.");
+                    Program.bSelectvalid = false;
+                    break;
+                case 23:            // server list begin
+                    reset = false;
+                    break;
+                case 24:            // server list end
+                    // finished loading serverlist
+                    // set the waiter to continue CLI from Login()
+                    break;
+                case 27:            // launcher(client) disconnected from master
+                    // dont print or log if program gets closed
+                    if (Program.bExit)
+                        return;
+                    // check if logged in or else we'll get 2 errormessages if Auth Error occurs
+                    if (Program.bLoggedin)
+                        Program.PrintError("You were disconnected from Master!");
+                    break;
+                case 28:            // mclient timeouted and disconnected
+                    Program.PrintError("Master timed out and disconnected!");
+                    break;
+                case 29:            // Server connected
+                    Program.PrintLogInfo("Server connected.");
+                    break;
+                case 30:            // Server auth success
+                    Program.PrintLogInfo("Server authenticated.");
+                    // draw server-entry
+                    break;
+                case 31:            // Server auth error
+                    Program.PrintError("Server authentication error!");
+                    break;
+                case 32:            // launcher(server) disconnected from master
+                    // dont print or log if program gets closed
+                    if (Program.bExit)
+                        return;
+                    Program.PrintError("Server disconnected from master!");
+                    Program.PrintLogInfo("Will reconnect in 10 seconds...");
+                    break;
+                case 33:            // mserver timeouted and disconnected
+                    // dont print or log if program gets closed
+                    if (Program.bExit)
+                        return;
+                    Program.PrintError("Master timed out and disconnected!");
+                    break;
+                case 34:            // launcher(server) connected to master
+                    break;
+                case 35:            // Server disconnected
+                    // dont print or log if program gets closed
+                    if (Program.bExit)
+                        return;
+                    Program.PrintLogInfo("Server disconnected!");
+                    break;
+                case 36:            // stats begin
+                    // don't set waiter on stats-begin-message
+                    reset = false;
+                    break;
+                case 37:            // stats end
+                    break;
+                case 666:           // BANNED
+                    Program.PrintError("You have been globally banned from all servers!");
+                    break;
+                default:
+                    reset = false;
+                    Program.PrintInfo("Z-Event: " + zevent);
+                    break;
+            }
+
+            Program.iLastEvent = zevent;
+        }
+
+
+        // client Messages
+        private void ClientListener(string type, string value)
+        {
+            // do not process messages if we are in servermode
+            // otherwise a second instance of this launcher would catch the messages of the other one
+            if (Program.bServer)
+                return;
+
+            //Program.PrintInfo("[" + type + "] " + value);
+
+            if (value.StartsWith("State_NotLoggedIn State_ClaimReservation"))
+            {
+                Program.PrintInfo("Logging in on server...");
+            }
+            if (value.StartsWith("State_Ready State_ClaimReservation"))
+            {
+                Program.PrintInfo("Requesting slot...");
+            }
+            if (value.StartsWith("State_Connecting State_ClaimReservation"))
+            {
+                Program.PrintInfo("Loading Game...");
+            }
+            if (value.StartsWith("State_GameLoading State_Game"))
+            {
+                Program.PrintInfo("Ingame!");
+            }
+
+            // process Alerts
+            if (type == "Alert")
+            {
+                string[] msg = value.Split(' ');
+                switch (msg[0])
+                {
+                    case "ERR_DISCONNECT_GAME_BANNED":
+                        Program.PrintWarning("Game disconnected: you have been banned from this server.");
+                        break;
+                    case "ERR_DISCONNECT_GAME_KICKEDBYADMIN":
+                        Program.PrintWarning("Game disconnected: you were kicked by an admin.");
+                        break;
+                    case "ERR_DISCONNECT_GAME_TIMEDOUT":
+                        Program.PrintWarning("Game disconnected: your connection to the server timed out.");
+                        break;
+                    case "ERR_DISCONNECT_GAME_GENERICERROR":
+                        Program.PrintWarning("You were disconnected from the server.");
+                        break;
+                    case "ERR_DISCONNECT_BLAZE":
+                        Program.PrintWarning("You were disconnected from Master.");
+                        break;
+                    case "ERR_DISCONNECT_GAME_KICKEDVIAPUNKBUSTER":
+                        Program.PrintWarning("Game disconnected: you were kicked by PunkBuster.");
+                        break;
+                    case "ERR_DISCONNECT_GAME_INTERACTIVITYTIMEOUT":
+                        Program.PrintWarning("Game disconnected: you have been kicked for being idle too long");
+                        break;
+                }
+            }
+        }
+
+
+        // server added/removed 
+        private void ServerListener(int id, bool added)
+        {
+            if (added)
+            {
+                if (ServerList.ContainsKey(id) == false)
+                    ServerList[id] = new Data.BF3server();
+            }
+            else
+            {
+                ServerList.Remove(id);
+            }
+        }
+
+
+        // server name
+        private void ServerListenerName(int id, string name)
+        {
+            if (ServerList.ContainsKey(id))
+            {
+                ServerList[id].name = name;
+            }
+        }
+
+
+        // server attributes/settings (except name, slots, state and players)
+        private void ServerListenerAttr(int id, string name, string value)
+        {
+            if (ServerList.ContainsKey(id))
+            {
+                ServerList[id].attr[name] = value;
+            }
+        }
+
+
+        // server slots (cap1 is redundant)
+        private void ServerListenerCap(int id, int cap0, int cap1)
+        {
+            if (ServerList.ContainsKey(id))
+            {
+                ServerList[id].gamesize = cap0;
+            }
+        }
+
+
+        // server state (INITIALIZING (1), PRE_GAME (130), IN_GAME (131), POST_GAME (141))
+        private void ServerListenerState(int id, int state)
+        {
+            if (ServerList.ContainsKey(id))
+            {
+                ServerList[id].state = state;
+            }
+        }
+
+
+        // server players
+        private void ServerListenerPlayers(int id, int players)
+        {
+            if (ServerList.ContainsKey(id))
+            {
+                ServerList[id].playercount = players;
+            }
+        }
+
+
+        // server IP and port
+        private void ServerListenerAddr(int id, string ip, int port)
+        {
+            if (ServerList.ContainsKey(id))
+            {
+                ServerList[id].ip = ip;
+                ServerList[id].port = port;
+            }
+        }
+
+
+        // zloMaster related messages
+        private void ZMessageListener(string msg)
+        {
+            Program.PrintInfo("zMSG: " + msg);
+        }
+
+
+        // launcher version
+        private void VersionListener(int version)
+        {
+
+        }
+
+
+        // player stats
+        private void StatListener(string name, float value)
+        {
+            // stats-caching
+            if (!PlayerStats.ContainsKey(name))
+                PlayerStats.Add(name, value);
+            else
+                PlayerStats[name] = value;
+        }
+
+
+        // player dogtags
+        private void DogTagListener(int advanced, int basic)
+        {
+            Program.iDogtag1 = basic;
+            Program.iDogtag2 = advanced;
+        }
+
+
+        // player clantag
+        private void ClanTagListener(string name)
+        {
+            Program.sClantag = name;
+        }
+
+
+        #region Setup
+        // create event-functions
+        public void SetupEvents()
+        {
+            EventListenerInstance = new tEventListener(EventListener);
+            ClientListenerInstance = new tClientListener(ClientListener);
+            ServerListenerInstance = new tServerListener(ServerListener);
+            ServerListenerNameInstance = new tServerListenerName(ServerListenerName);
+            ServerListenerAttrInstance = new tServerListenerAttr(ServerListenerAttr);
+            ServerListenerCapInstance = new tServerListenerCap(ServerListenerCap);
+            ServerListenerStateInstance = new tServerListenerState(ServerListenerState);
+            ServerListenerPlayersInstance = new tServerListenerPlayers(ServerListenerPlayers);
+            ServerListenerAddrInstance = new tServerListenerAddr(ServerListenerAddr);
+            ZMessageListenerInstance = new tZMessageListener(ZMessageListener);
+            VersionListenerInstance = new tVersionListener(VersionListener);
+            StatListenerInstance = new tStatListener(StatListener);
+            DogTagsListenerInstance = new tDogTagsListener(DogTagListener);
+            ClanTagListenerInstance = new tClanTagListener(ClanTagListener);
+
+            ZLO_SetEventListener(EventListenerInstance);
+            ZLO_SetClientListener(ClientListenerInstance);
+            ZLO_SetServerListener(ServerListenerInstance);
+            ZLO_SetServerListenerName(ServerListenerNameInstance);
+            ZLO_SetServerListenerAttr(ServerListenerAttrInstance);
+            ZLO_SetServerListenerCap(ServerListenerCapInstance);
+            ZLO_SetServerListenerState(ServerListenerStateInstance);
+            ZLO_SetServerListenerPlayers(ServerListenerPlayersInstance);
+            ZLO_SetServerListenerAddr(ServerListenerAddrInstance);
+            ZLO_SetZMessageListener(ZMessageListenerInstance);
+            ZLO_SetVersionListener(VersionListenerInstance);
+            ZLO_SetStatListener(StatListenerInstance);
+            ZLO_SetDogTagsListener(DogTagsListenerInstance);
+            ZLO_SetClanTagListener(ClanTagListenerInstance);
+        }
+
+
+        // zloAPI fields
+        private tEventListener EventListenerInstance;                   // EventListener()          - all zloAPI-events (messages)
+        private tClientListener ClientListenerInstance;                 // ClientListener()         - all BF3-specific client-events (messages)
+        private tServerListener ServerListenerInstance;                 // ServerListener()         - server (sID) added/removed
+        private tServerListenerName ServerListenerNameInstance;         // ServerListenerName()     - server name (zloAPI.BF3.ServerList[sID].name)
+        private tServerListenerAttr ServerListenerAttrInstance;         // ServerListenerAttr()     - server attributes (zloAPI.BF3.ServerList[sID].attr[""])
+        private tServerListenerCap ServerListenerCapInstance;           // ServerListenerCap()      - server gamesize (zloAPI.BF3.ServerList[sID].gamesize)
+        private tServerListenerState ServerListenerStateInstance;       // ServerListenerState()    - server state (zloAPI.BF3.ServerList[sID].state)
+        private tServerListenerPlayers ServerListenerPlayersInstance;   // ServerListenerPlayers()  - server playercount (zloAPI.BF3.ServerList[sID].playercount)
+        private tServerListenerAddr ServerListenerAddrInstance;         // ServerListenerAddr()     - server IP/port (zloAPI.BF3.ServerList[sID].ip / .port)
+        private tZMessageListener ZMessageListenerInstance;             // ZMessageListener()       - zloMaster related messages
+        private tVersionListener VersionListenerInstance;               // VersionListener()        - latest launcher version from zloemu
+        private tStatListener StatListenerInstance;                     // StatListener()           - player stats
+        private tDogTagsListener DogTagsListenerInstance;               // DogTagListener()         - both player dogtags
+        private tClanTagListener ClanTagListenerInstance;               // ClanTagListener()        - player clantag
+
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tEventListener(int zevent);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tClientListener(string type, string value);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tServerListener(int id, bool added);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tServerListenerName(int id, string name);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tServerListenerAttr(int id, string name, string value);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tServerListenerCap(int id, int cap0, int cap1);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tServerListenerState(int id, int state);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tServerListenerPlayers(int id, int players);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tServerListenerAddr(int id, string ip, int port);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tZMessageListener(string msg);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tVersionListener(int version);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tStatListener(string name, float value);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tDogTagsListener(int dta, int dtb);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void tClanTagListener(string name);
+
+
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_Init();
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetEventListener(tEventListener l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetClientListener(tClientListener l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetServerListener(tServerListener l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetServerListenerName(tServerListenerName l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetServerListenerAttr(tServerListenerAttr l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetServerListenerCap(tServerListenerCap l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetServerListenerState(tServerListenerState l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetServerListenerPlayers(tServerListenerPlayers l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetServerListenerAddr(tServerListenerAddr l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetZMessageListener(tZMessageListener l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetVersionListener(tVersionListener l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetStatListener(tStatListener l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetDogTagsListener(tDogTagsListener l);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ZLO_SetClanTagListener(tClanTagListener l);
+        // Client
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern bool ZLO_ConnectMClient();
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_AuthClient(string login, string pass);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_GetServerList();
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_SelectServer(int id);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int ZLO_RunMulti();
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int ZLO_RunSingle();
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int ZLO_RunCoop(int mission, int difficulty);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int ZLO_GetID();
+        // custom version of ZLO_GetName() for .NET Framework 4.5 as Marshalling on .NET 4.5 will de-allocate the string-memory from DLL
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr ZLO_GetName();
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_GetVersion(int launcher);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_GetStats();
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_GetDogTags();
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_SetDogTags(int dta, int dtb);
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_GetClanTag();
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_SetClanTag(string name);
+        // Server
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern bool ZLO_ListenServer();
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern bool ZLO_ConnectMServer();
+        // Terminate
+        [DllImport("LauncherBF3.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void ZLO_Close();
+        #endregion
+    }
+}

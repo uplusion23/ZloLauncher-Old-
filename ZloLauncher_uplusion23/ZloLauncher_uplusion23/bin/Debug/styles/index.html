@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Battlefield Menu Attempt</title>
+    <link rel="stylesheet" href="css/style.css">
+  </head>
+  <body>
+    <video autoplay loop id="bgvid">
+      <source src="bf4.webm" type="video/webm">
+    </video>
+    <span class="build">Build-0_0_2B</span>
+    <div class="dev">AddDummyServer</div>
+    <div class="main hidden">
+      <div class="menu">
+        <ul>
+          <li><a href="#" id="singleplayer" class="primary">Singleplayer</a></li>
+          <li><a href="#" id="multiplayer">Multiplayer</a></li>
+          <li class="spacer"></li>
+          <li><a href="#" id="mysoldier" class="secondary">My Soldier</a></li>
+          <li><a href="#" id="settings" class="secondary">Settings</a></li>
+          <li><a href="#" id="credits" class="secondary">Credits</a></li>
+          <li><a href="#" id="quit" class="secondary">Quit</a></li>
+        </ul>
+        <ul class="infopanel">
+          <li><span id="username">Username</span></li>
+        </ul>
+        <span class="tooltip"></span>
+      </div>
+      <div class="multiplayer">
+        <span class="title">Servers</span>
+        <div class="tabs">
+          <ul>
+            <li><a href="#" class="backToMenu">Back</a></li>
+            <li class="active"><a href="#">Servers</a></li>
+            <li><a href="#">Favorites</a></li>
+            <li><a href="#">history</a></li>
+          </ul>
+        </div>
+        <div class="servers">
+          <table>
+            <tr>
+              <th>★</th>
+              <th>Server</th>
+              <th>Players</th>
+              <th>Server Type</th>
+              <th>Ping</th>
+            </tr>
+            <tr>
+              <td>★</td>
+              <td>
+                <span class="servername">[US-W] Some Battlefield Server</span>
+                Conquest | Tremors
+              </td>
+              <td>24/54</td>
+              <td>RANKED</td>
+              <td>32</td>
+            </tr>
+            <tr>
+              <td>★</td>
+              <td>
+                <span class="servername">[RU] Another Server</span>
+                Conquest | Tremors
+              </td>
+              <td>24/54</td>
+              <td>RANKED</td>
+              <td>242</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+      <div class="mysoldier">
+        <div class="title"><a href="#" class="backToMenu">&lsaquo;</a><span>My Soldier</span></div>
+        <div class="container">
+          <div class="soldier"></div>
+        </div>
+      </div>
+      <div class="settings">
+        <div class="title"><a href="#" class="backToMenu">&lsaquo;</a><span>Settings</span></div>
+        <div class="container">
+          <div class="row">
+            <div class="item active" data-tab="settingsLauncher">Launcher</div>
+            <div class="item" data-tab="settingsAudio">Audio</div>
+            <div class="item" data-tab="settingsVideo">Video</div>
+            <div class="item" data-tab="settingsKeybindings">Keybindings</div>
+          </div>
+          <div class="settingsTab active" id="settingsLauncher">
+            <div class="bar">
+            </div>
+            <div class="bar">
+            </div>
+            <div class="bar">
+            </div>
+            <div class="bar">
+            </div>
+            <div class="bar">
+            </div>
+            <div class="bar">
+            </div>
+            <div class="bar">
+            </div>
+          </div>
+          <div class="settingsTab" id="settingsAudio">
+            Audio
+          </div>
+          <div class="settingsTab" id="settingsVideo">
+            Video
+          </div>
+          <div class="settingsTab" id="settingsKeybindings">
+            Keys
+          </div>
+        </div>
+      </div>
+      <div class="credits">
+        <div class="title"><a href="#" class="backToMenu">&lsaquo;</a><span>Credits</span></div>
+        <div class="container">
+          <h1>Credits</h1>
+          <ul>
+            <li>uplusion23 | <a href="#">Everything</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="log-in">
+      <div class="dialog">
+        <div class="title">
+          <span>Log In</span>
+        </div>
+        <h2>Email Address</h2>
+        <input type="text" class="text" id="email">
+        <h2>Password</h2>
+        <input type="text" class="text password" id="pass">
+        <div class="switch">
+          <input type="checkbox" id="rememberMe" />
+          <div class="handle">
+          </div>
+          Remember Me
+        </div>
+        <a id="signin">
+          Sign In
+        </a>
+      </div>
+    </div>
+    <script src='jquery.min.js'></script>
+    <script src="js/index.js"></script>
+  </body>
+</html>
